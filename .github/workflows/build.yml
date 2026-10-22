@@ -21,8 +21,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.1
-      - name: Generate project
-        run: bash ffpanel.sh
+      - name: Generate project (Patch SDK to 33)
+        run: |
+          sed -i 's/compileSdk = 34/compileSdk = 33/g' ffpanel.sh
+          sed -i 's/targetSdk = 34/targetSdk = 33/g' ffpanel.sh
+          bash ffpanel.sh
       - name: Build APK
         run: |
           cd FFPanel
