@@ -15,19 +15,15 @@ jobs:
           java-version: 17
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
-      - uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.1
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses || true
       - name: Generate project
         run: bash ffpanel.sh
       - name: Build APK
         run: |
           cd FFPanel
-          if [ ! -f gradlew ]; then gradle wrapper --gradle-version 8.1; fi
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --stacktrace
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
