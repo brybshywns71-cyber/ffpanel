@@ -17,6 +17,10 @@ jobs:
         uses: android-actions/setup-android@v4
       - name: Accept Android SDK Licenses
         run: yes | sdkmanager --licenses || true
+      - name: Setup Gradle 8.1
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.1
       - name: Generate project
         run: bash ffpanel.sh
       - name: Build APK
