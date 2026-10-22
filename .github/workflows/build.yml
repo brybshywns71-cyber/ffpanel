@@ -17,20 +17,20 @@ jobs:
         uses: android-actions/setup-android@v4
       - name: Accept Android SDK Licenses
         run: yes | sdkmanager --licenses || true
-      - name: Setup Gradle 8.2
+      - name: Setup Gradle 8.5
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.2
-      - name: Generate project
+          gradle-version: 8.5
+      - name: Generate and Patch project
         run: |
+          # نعدل السكربت الأصلي عشان يتوافق مع AGP 8.2.2 و Kotlin 1.9.22
           sed -i 's/version "8.1.0"/version "8.2.2"/g' ffpanel.sh
-          sed -i 's/gradle-version 8.1/gradle-version 8.2/g' ffpanel.sh
+          sed -i 's/version "1.9.0"/version "1.9.22"/g' ffpanel.sh
           bash ffpanel.sh
       - name: Build APK
         run: |
           cd FFPanel
-          chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace
+          gradle assembleRelease --stacktrace
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
