@@ -421,6 +421,7 @@ class AimAccessibilityService : AccessibilityService() {
 }
 EOF
 
+# ============ NEW Mod Menu Overlay Service ============
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/OverlayService.kt" <<'EOF'
 package com.vanta.ffpanel
 
@@ -432,14 +433,20 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.Switch
+import android.widget.TextView
 import androidx.core.app.NotificationCompat
 
 class OverlayService : Service() {
-    companion object { private const val CHANNEL_ID = "ffpanel_overlay"; private const val NOTIF_ID = 1 }
+
     private lateinit var wm: WindowManager
-    private lateinit var view: OverlayView
-    private val handler = Handler(Looper.getMainLooper())
+    private lateinit var espView: ESPView
+    private lateinit var panelView: LinearLayout
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -447,67 +454,143 @@ class OverlayService : Service() {
         DetectionBridge.aimActive = intent?.getBooleanExtra("aim", false) ?: false
         DetectionBridge.fovPx = intent?.getIntExtra("fov", 250) ?: 250
         DetectionBridge.showEsp = intent?.getBooleanExtra("esp", true) ?: true
+
         startForegroundNotification()
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        view = OverlayView(this)
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+
+        // 1. إضافة شاشة الرسم (الـ ESP)
+        espView = ESPView(this)
+        val espParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
-        wm.addView(view, params)
-        handler.post(renderLoop)
+        wm.addView(espView, espParams)
+
+        // 2. إضافة القائمة العائمة (Panel)
+        setupPanelView()
+
         return START_STICKY
     }
 
-    private val renderLoop = object : Runnable {
-        override fun run() { view.invalidate(); handler.postDelayed(this, 16) }
+    private fun setupPanelView() {
+        panelView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#CC000000"))
+            setPadding(30, 30, 30, 30)
+            alpha = 0.8f // شفافية عشان ميعميش اللعبة
+        }
+
+        val title = TextView(this).apply {
+            text = "FF PANEL"
+            setTextColor(Color.GREEN)
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 20)
+        }
+        panelView.addView(title)
+
+        val espSwitch = Switch(this).apply {
+            text = " ESP"
+            setTextColor(Color.WHITE)
+            isChecked = DetectionBridge.showEsp
+            setOnCheckedChangeListener { _, isChecked -> DetectionBridge.showEsp = isChecked }
+        }
+        panelView.addView(espSwitch)
+
+        val aimSwitch = Switch(this).apply {
+            text = " Aimbot"
+            setTextColor(Color.WHITE)
+            isChecked = DetectionBridge.aimActive
+            setOnCheckedChangeListener { _, isChecked -> DetectionBridge.aimActive = isChecked }
+        }
+        panelView.addView(aimSwitch)
+
+        val panelParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+        panelParams.gravity = Gravity.TOP or Gravity.START
+        panelParams.x = 50
+        panelParams.y = 100
+
+        panelView.setOnTouchListener(object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var initialTouchX = 0f
+            private var initialTouchY = 0f
+
+            override fun onTouch(v: View, event: MotionEvent): Boolean {
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = panelParams.x
+                        initialY = panelParams.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        panelParams.x = initialX + (event.rawX - initialTouchX).toInt()
+                        panelParams.y = initialY + (event.rawY - initialTouchY).toInt()
+                        wm.updateViewLayout(panelView, panelParams)
+                        return true
+                    }
+                }
+                return false
+            }
+        })
+
+        wm.addView(panelView, panelParams)
     }
 
     private fun startForegroundNotification() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(CHANNEL_ID, "FF Panel", NotificationManager.IMPORTANCE_LOW)
+        val channelId = "ff_panel_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel(channelId, "FF Panel", NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
         }
-        startForeground(NOTIF_ID, NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("FF Panel").setContentText("Overlay running")
+        startForeground(1, NotificationCompat.Builder(this, channelId)
+            .setContentTitle("FF Panel").setContentText("Running")
             .setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build())
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(renderLoop)
-        if (::view.isInitialized) wm.removeView(view)
+        if (::espView.isInitialized) wm.removeView(espView)
+        if (::panelView.isInitialized) wm.removeView(panelView)
         DetectionBridge.aimActive = false
         super.onDestroy()
     }
 }
 
-class OverlayView(ctx: Context) : android.view.View(ctx) {
+class ESPView(ctx: Context) : View(ctx) {
     private val boxPaint = Paint().apply {
         color = Color.rgb(0, 255, 140); style = Paint.Style.STROKE
-        strokeWidth = 3f; isAntiAlias = true
+        strokeWidth = 4f; isAntiAlias = true
     }
-    private val labelPaint = Paint().apply { color = Color.WHITE; textSize = 32f; isAntiAlias = true }
     private val fovPaint = Paint().apply {
         color = Color.argb(80, 255, 255, 255); style = Paint.Style.STROKE; strokeWidth = 2f
     }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val sw = DetectionBridge.screenW.toFloat(); val sh = DetectionBridge.screenH.toFloat()
-        if (sw <= 0 || sh <= 0) return
         if (DetectionBridge.aimActive)
-            canvas.drawCircle(sw / 2f, sh / 2f, DetectionBridge.fovPx.toFloat(), fovPaint)
+            canvas.drawCircle(width / 2f, height / 2f, DetectionBridge.fovPx.toFloat(), fovPaint)
+
         if (!DetectionBridge.showEsp) return
         for (d in DetectionBridge.latest) {
             canvas.drawRect(d.left, d.top, d.right, d.bottom, boxPaint)
-            canvas.drawText("${(d.score * 100).toInt()}%", d.left, d.top - 8f, labelPaint)
         }
+        invalidate()
     }
 }
 EOF
