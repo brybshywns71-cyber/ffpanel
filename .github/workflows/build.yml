@@ -23,12 +23,11 @@ jobs:
           gradle-version: 8.5
       - name: Generate project and Patch Gradle
         run: |
-          # تعديل نسخ البرامج في السكربت الأساسي
           sed -i 's/version "8.1.0"/version "8.2.2"/g' ffpanel.sh
           sed -i 's/version "1.9.0"/version "1.9.22"/g' ffpanel.sh
           bash ffpanel.sh
           
-          # استبدال ملف الـ Gradle الخاص بالتطبيق لضبط نسخ الـ Java
+          # تعديل ملف Gradle عشان يوقّع النسخة النهائية
           cat << 'EOF' > FFPanel/app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -42,7 +41,12 @@ jobs:
                   minSdk = 26; targetSdk = 34
                   versionCode = 1; versionName = "1.0"
               }
-              buildTypes { release { isMinifyEnabled = false } }
+              buildTypes { 
+                  release { 
+                      isMinifyEnabled = false 
+                      signingConfig = signingConfigs.getByName("debug") // السطر ده اللي بيوقّع التطبيق
+                  } 
+              }
               androidResources { noCompress += "tflite" }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
