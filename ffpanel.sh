@@ -40,11 +40,13 @@ android {
         versionCode = 1; versionName = "1.0"
     }
     buildTypes { release { isMinifyEnabled = false } }
+    androidResources { noCompress += "tflite" }
 }
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
 }
 EOF
 
@@ -162,12 +164,87 @@ package com.vanta.ffpanel
 
 import android.content.Context
 import android.graphics.Bitmap
+import org.tensorflow.lite.DataType
+import org.tensorflow.lite.Interpreter
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 
 class Detector(context: Context) : AutoCloseable {
-    fun detect(frame: Bitmap): List<Detection> {
-        return emptyList() // AI disabled to prevent crash on low RAM
+    companion object {
+        private const val MODEL_FILE = "ssd_mobilenet.tflite"
+        private const val INPUT_SIZE = 300
+        private const val MAX_DET = 10
+        private const val SCORE_THRESHOLD = 0.50f
+        private const val PERSON_CLASS = 0
     }
-    override fun close() {}
+
+    private val interpreter: Interpreter
+    private val inputBuffer: ByteBuffer
+    private val isQuantInput: Boolean
+    private val locOut = Array(1) { Array(MAX_DET) { FloatArray(4) } }
+    private val catOut = Array(1) { FloatArray(MAX_DET) }
+    private val scoreOut = Array(1) { FloatArray(MAX_DET) }
+    private val numOut = FloatArray(1)
+    private val outMap = HashMap<Int, Any>()
+
+    init {
+        // خفضنا الأنثريد لـ 2 عشان الرام ميتقلش
+        interpreter = Interpreter(loadModel(context), Interpreter.Options().apply { setNumThreads(2) })
+        isQuantInput = interpreter.getInputTensor(0).dataType() == DataType.UINT8
+        inputBuffer = ByteBuffer.allocateDirect(INPUT_SIZE * INPUT_SIZE * 3 * 4).order(ByteOrder.nativeOrder())
+        outMap[0] = locOut
+        outMap[1] = catOut
+        outMap[2] = scoreOut
+        outMap[3] = numOut
+    }
+
+    fun detect(frame: Bitmap): List<Detection> {
+        val scaled = Bitmap.createScaledBitmap(frame, INPUT_SIZE, INPUT_SIZE, true)
+        inputBuffer.rewind()
+        val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
+        scaled.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
+        if (isQuantInput) {
+            for (p in pixels) {
+                inputBuffer.put(((p shr 16) and 0xFF).toByte())
+                inputBuffer.put(((p shr 8) and 0xFF).toByte())
+                inputBuffer.put((p and 0xFF).toByte())
+            }
+        } else {
+            for (p in pixels) {
+                inputBuffer.putFloat(((p shr 16) and 0xFF) / 255f)
+                inputBuffer.putFloat(((p shr 8) and 0xFF) / 255f)
+                inputBuffer.putFloat((p and 0xFF) / 255f)
+            }
+        }
+        inputBuffer.rewind()
+        interpreter.runForMultipleInputsOutputs(arrayOf(inputBuffer), outMap)
+        if (scaled !== frame) scaled.recycle()
+
+        val count = numOut[0].toInt().coerceIn(0, MAX_DET)
+        val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
+        if (sw <= 0 || sh <= 0) return emptyList()
+
+        val out = ArrayList<Detection>(count)
+        for (i in 0 until count) {
+            if (scoreOut[0][i] < SCORE_THRESHOLD) continue
+            if (catOut[0][i].toInt() != PERSON_CLASS) continue
+            val b = locOut[0][i]
+            out.add(Detection(b[1] * sw, b[0] * sh, b[3] * sw, b[2] * sh, scoreOut[0][i]))
+        }
+        return out
+    }
+
+    private fun loadModel(context: Context): MappedByteBuffer {
+        context.assets.openFd(MODEL_FILE).use { fd ->
+            FileInputStream(fd.fileDescriptor).use { fis ->
+                return fis.channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+            }
+        }
+    }
+    override fun close() { try { interpreter.close() } catch (_: Throwable) {} }
 }
 EOF
 
@@ -285,7 +362,7 @@ class AimAccessibilityService : AccessibilityService() {
     private val tick = object : Runnable {
         override fun run() {
             if (DetectionBridge.aimActive) tryAim()
-            handler.postDelayed(this, 30)
+            handler.postDelayed(this, 40)
         }
     }
 
@@ -295,7 +372,7 @@ class AimAccessibilityService : AccessibilityService() {
 
     private fun tryAim() {
         val now = System.currentTimeMillis()
-        if (now - lastAimMs < 60) return
+        if (now - lastAimMs < 80) return
         
         val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
         if (sw <= 0 || sh <= 0) return
@@ -314,8 +391,8 @@ class AimAccessibilityService : AccessibilityService() {
         val target = best ?: return
         val tX = (target.left + target.right) / 2f
         val tY = target.top + (target.bottom - target.top) * 0.2f
-        val dx = (tX - cx) * 0.20f 
-        val dy = (tY - cy) * 0.20f
+        val dx = (tX - cx) * 0.25f 
+        val dy = (tY - cy) * 0.25f
         
         if (hypot(dx, dy) < 4f) return
         
@@ -544,6 +621,25 @@ class MainActivity : AppCompatActivity() {
     }
 }
 EOF
+
+# ============ Model Download (SSD MobileNet - Lightweight) ============
+MODEL="$ROOT/app/src/main/assets/ssd_mobilenet.tflite"
+URL="https://storage.googleapis.com/download.tensorflow.org/models/tflite/task_library/object_detection/android/lite-model_efficientdet_lite0_detection_metadata_1.tflite"
+# * Actually let's use the real ssd_mobilenet tflite link for Android *
+URL="https://storage.googleapis.com/download.tensorflow.org/models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29.zip"
+
+echo "[*] downloading lightweight model..."
+if command -v curl >/dev/null 2>&1; then 
+    curl -L -o model.zip "$URL"
+    unzip -p model.zip detect.tflite > "$MODEL"
+    rm model.zip
+elif command -v wget >/dev/null 2>&1; then 
+    wget -O model.zip "$URL"
+    unzip -p model.zip detect.tflite > "$MODEL"
+    rm model.zip
+else 
+    echo "[!] Failed to download model. Ensure unzip is installed."; exit 1; 
+fi
 
 if [ ! -f "$ROOT/gradlew" ]; then
     if command -v gradle >/dev/null 2>&1; then (cd "$ROOT" && gradle wrapper --gradle-version 8.1)
