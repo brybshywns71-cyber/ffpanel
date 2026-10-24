@@ -21,15 +21,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.5
-      - name: Generate project and Patch Gradle
-        run: |
-          sed -i 's/version "8.1.0"/version "8.2.2"/g' ffpanel.sh
-          sed -i 's/version "1.9.0"/version "1.9.22"/g' ffpanel.sh
-          
-          # السطر ده اللي بيوقّع التطبيق (عشان يشتغل على أندرويد 14)
-          sed -i 's/buildTypes { release { isMinifyEnabled = false } }/buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }/g' ffpanel.sh
-          
-          bash ffpanel.sh
+      - name: Generate project
+        run: bash ffpanel.sh
       - name: Build APK
         run: |
           cd FFPanel
