@@ -25,44 +25,11 @@ jobs:
         run: |
           sed -i 's/version "8.1.0"/version "8.2.2"/g' ffpanel.sh
           sed -i 's/version "1.9.0"/version "1.9.22"/g' ffpanel.sh
-          bash ffpanel.sh
           
-          # تعديل ملف Gradle عشان يوقّع النسخة النهائية
-          cat << 'EOF' > FFPanel/app/build.gradle.kts
-          plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-          }
-          android {
-              namespace = "com.vanta.ffpanel"
-              compileSdk = 34
-              defaultConfig {
-                  applicationId = "com.vanta.ffpanel"
-                  minSdk = 26; targetSdk = 34
-                  versionCode = 1; versionName = "1.0"
-              }
-              buildTypes { 
-                  release { 
-                      isMinifyEnabled = false 
-                      signingConfig = signingConfigs.getByName("debug") // السطر ده اللي بيوقّع التطبيق
-                  } 
-              }
-              androidResources { noCompress += "tflite" }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-          }
-          dependencies {
-              implementation("androidx.core:core-ktx:1.12.0")
-              implementation("androidx.appcompat:appcompat:1.6.1")
-              implementation("com.google.android.material:material:1.11.0")
-              implementation("org.tensorflow:tensorflow-lite:2.14.0")
-          }
-          EOF
+          # السطر ده اللي بيوقّع التطبيق (عشان يشتغل على أندرويد 14)
+          sed -i 's/buildTypes { release { isMinifyEnabled = false } }/buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }/g' ffpanel.sh
+          
+          bash ffpanel.sh
       - name: Build APK
         run: |
           cd FFPanel
