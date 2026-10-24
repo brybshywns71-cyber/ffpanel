@@ -9,7 +9,6 @@ mkdir -p "$ROOT/app/src/main/java/com/vanta/ffpanel" \
          "$ROOT/app/src/main/res/drawable" \
          "$ROOT/app/src/main/assets"
 
-# ============ Gradle ============
 cat > "$ROOT/build.gradle.kts" <<'EOF'
 plugins {
     id("com.android.application") version "8.1.0" apply false
@@ -30,6 +29,8 @@ android.useAndroidX=true
 kotlin.code.style=official
 android.nonTransitiveRClass=true
 EOF
+
+# ============ build.gradle.kts للتطبيق (فيه التوقيع جاهز) ============
 cat > "$ROOT/app/build.gradle.kts" <<'EOF'
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
@@ -40,7 +41,12 @@ android {
         minSdk = 26; targetSdk = 34
         versionCode = 1; versionName = "1.0"
     }
-    buildTypes { release { isMinifyEnabled = false } }
+    buildTypes { 
+        release { 
+            isMinifyEnabled = false 
+            signingConfig = signingConfigs.getByName("debug") 
+        } 
+    }
     androidResources { noCompress += "tflite" }
 }
 dependencies {
@@ -138,13 +144,19 @@ cat > "$ROOT/app/src/main/res/layout/activity_main.xml" <<'EOF'
 </LinearLayout>
 EOF
 
-# ============ تحميل صورة الخلفية ============
-echo "[*] Downloading background image..."
-BG_URL="https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=500&auto=format&fit=crop"
-# لو حبيت تغير الصورة، غير الرابط اللي فوق
-if command -v curl >/dev/null 2>&1; then curl -L -o "$ROOT/app/src/main/res/drawable/panel_bg.jpg" "$BG_URL"
-elif command -v wget >/dev/null 2>&1; then wget -O "$ROOT/app/src/main/res/drawable/panel_bg.jpg" "$BG_URL"
-fi
+# ============ خلفية البانل (XML) ============
+cat > "$ROOT/app/src/main/res/drawable/bg_panel.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:startColor="#E6000000"
+        android:centerColor="#E60A1929"
+        android:endColor="#E6005C99"
+        android:angle="135" />
+    <corners android:radius="18dp" />
+    <stroke android:width="3dp" android:color="#00FF40" />
+</shape>
+EOF
 
 # ============ Kotlin ============
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/DetectionBridge.kt" <<'EOF'
@@ -421,7 +433,6 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
@@ -463,24 +474,9 @@ class OverlayService : Service() {
     private fun setupPanelView() {
         panelView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            // تعيين صورة الخلفية
-            setBackgroundResource(R.drawable.panel_bg)
+            setBackgroundResource(R.drawable.bg_panel)
             setPadding(40, 40, 40, 40)
-            
-            // إضافة طبقة شفافة فوق الصورة عشان الكلام يبان
-            val overlay = GradientDrawable()
-            overlay.setColor(Color.parseColor("#80000000")) // أسود شفاف 50%
-            overlay.cornerRadius = 30f
-            overlay.setStroke(4, Color.parseColor("#00FF40")) // إطار أخضر
-            background = overlay 
-            // ملاحظة: لو عايز الصورة تبان، استخدم الطريقة دي بدل الخلفية السادة
         }
-        
-        // لإظهار الصورة مع الإطار الأخضر، نستخدم خلفية مركبة (Layer-List)
-        // لكن لتبسيط الكود، هنستخدم صورة الخلفية مع شفافية
-        val layerDrawable = resources.getDrawable(R.drawable.panel_bg, null)
-        panelView.background = layerDrawable
-
         val title = TextView(this).apply {
             text = "🔥 FF PANEL 🔥"
             setTextColor(Color.parseColor("#00FF40"))
@@ -647,18 +643,12 @@ class MainActivity : AppCompatActivity() {
 }
 EOF
 
-# ============ Model Download ============
 MODEL="$ROOT/app/src/main/assets/ssd_mobilenet.tflite"
 URL="https://storage.googleapis.com/download.tensorflow.org/models/tflite/task_library/object_detection/android/lite-model_ssd_mobilenet_v1_1_metadata_2.tflite"
-
 echo "[*] downloading model..."
-if command -v curl >/dev/null 2>&1; then 
-    curl -L -o "$MODEL" "$URL"
-elif command -v wget >/dev/null 2>&1; then 
-    wget -O "$MODEL" "$URL"
-else 
-    echo "[!] Failed to download model."; exit 1; 
-fi
+if command -v curl >/dev/null 2>&1; then curl -L -o "$MODEL" "$URL"
+elif command -v wget >/dev/null 2>&1; then wget -O "$MODEL" "$URL"
+else echo "[!] Failed to download model."; exit 1; fi
 
 if [ ! -f "$ROOT/gradlew" ]; then
     if command -v gradle >/dev/null 2>&1; then (cd "$ROOT" && gradle wrapper --gradle-version 8.1)
