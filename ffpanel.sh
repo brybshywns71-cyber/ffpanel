@@ -6,6 +6,7 @@ mkdir -p "$ROOT/app/src/main/java/com/vanta/ffpanel" \
          "$ROOT/app/src/main/res/layout" \
          "$ROOT/app/src/main/res/values" \
          "$ROOT/app/src/main/res/xml" \
+         "$ROOT/app/src/main/res/drawable" \
          "$ROOT/app/src/main/assets"
 
 # ============ Gradle ============
@@ -136,6 +137,14 @@ cat > "$ROOT/app/src/main/res/layout/activity_main.xml" <<'EOF'
         android:layout_width="match_parent" android:layout_height="wrap_content"/>
 </LinearLayout>
 EOF
+
+# ============ تحميل صورة الخلفية ============
+echo "[*] Downloading background image..."
+BG_URL="https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=500&auto=format&fit=crop"
+# لو حبيت تغير الصورة، غير الرابط اللي فوق
+if command -v curl >/dev/null 2>&1; then curl -L -o "$ROOT/app/src/main/res/drawable/panel_bg.jpg" "$BG_URL"
+elif command -v wget >/dev/null 2>&1; then wget -O "$ROOT/app/src/main/res/drawable/panel_bg.jpg" "$BG_URL"
+fi
 
 # ============ Kotlin ============
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/DetectionBridge.kt" <<'EOF'
@@ -380,28 +389,22 @@ class AimAccessibilityService : AccessibilityService() {
 
         var best: Detection? = null; var bestD = Float.MAX_VALUE
         for (d in DetectionBridge.latest) {
-            // التصويب على أعلى نقطة (الرأس)
-            val targetY = d.top + (d.bottom - d.top) * 0.05f
+            val targetY = d.top + (d.bottom - d.top) * 0.10f
             val targetX = (d.left + d.right) / 2f
-            
             val dist = hypot(targetX - cx, targetY - cy)
             if (dist > fov) continue
             if (dist < bestD) { bestD = dist; best = d }
         }
         
         val target = best ?: return
-        
         val tX = (target.left + target.right) / 2f
-        val tY = target.top + (target.bottom - target.top) * 0.05f
-
-        // سحب سريع جداً (قفلة) 80%
-        val dx = (tX - cx) * 0.8f 
-        val dy = (tY - cy) * 0.8f
+        val tY = target.top + (target.bottom - target.top) * 0.10f
+        val dx = (tX - cx) * 0.4f 
+        val dy = (tY - cy) * 0.4f
         
         if (hypot(dx, dy) < 4f) return
         
         val path = Path().apply { moveTo(cx, cy); lineTo(cx + dx, cy + dy) }
-        // تقليل وقت السحب لـ 20ms عشان يبقى فوري
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 20)).build()
         dispatchGesture(g, null, null)
         lastAimMs = now
@@ -418,6 +421,7 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
@@ -459,30 +463,46 @@ class OverlayService : Service() {
     private fun setupPanelView() {
         panelView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#CC000000"))
-            setPadding(30, 30, 30, 30)
-            alpha = 0.8f
+            // تعيين صورة الخلفية
+            setBackgroundResource(R.drawable.panel_bg)
+            setPadding(40, 40, 40, 40)
+            
+            // إضافة طبقة شفافة فوق الصورة عشان الكلام يبان
+            val overlay = GradientDrawable()
+            overlay.setColor(Color.parseColor("#80000000")) // أسود شفاف 50%
+            overlay.cornerRadius = 30f
+            overlay.setStroke(4, Color.parseColor("#00FF40")) // إطار أخضر
+            background = overlay 
+            // ملاحظة: لو عايز الصورة تبان، استخدم الطريقة دي بدل الخلفية السادة
         }
+        
+        // لإظهار الصورة مع الإطار الأخضر، نستخدم خلفية مركبة (Layer-List)
+        // لكن لتبسيط الكود، هنستخدم صورة الخلفية مع شفافية
+        val layerDrawable = resources.getDrawable(R.drawable.panel_bg, null)
+        panelView.background = layerDrawable
+
         val title = TextView(this).apply {
-            text = "FF PANEL"
-            setTextColor(Color.GREEN)
-            textSize = 18f
+            text = "🔥 FF PANEL 🔥"
+            setTextColor(Color.parseColor("#00FF40"))
+            textSize = 20f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 20)
         }
         panelView.addView(title)
 
         val espSwitch = Switch(this).apply {
-            text = " ESP"
+            text = " ESP (Wallhack)"
             setTextColor(Color.WHITE)
+            textSize = 16f
             isChecked = DetectionBridge.showEsp
             setOnCheckedChangeListener { _, isChecked -> DetectionBridge.showEsp = isChecked }
         }
         panelView.addView(espSwitch)
 
         val aimSwitch = Switch(this).apply {
-            text = " Aimbot"
+            text = " Aimbot (Head)"
             setTextColor(Color.WHITE)
+            textSize = 16f
             isChecked = DetectionBridge.aimActive
             setOnCheckedChangeListener { _, isChecked -> DetectionBridge.aimActive = isChecked }
         }
