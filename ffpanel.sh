@@ -120,3 +120,71 @@ class Detector(context: Context) : AutoCloseable {
     }
     override fun close() { try { interpreter.close() } catch (_: Throwable) {} }
 }
+package com.vanta.ffpanel
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.os.Handler
+import android.os.Looper
+import android.view.accessibility.AccessibilityEvent
+import kotlin.math.hypot
+
+class AimAccessibilityService : AccessibilityService() {
+    companion object { @Volatile var instance: AimAccessibilityService? = null }
+    private val handler = Handler(Looper.getMainLooper())
+    private var lastAimMs = 0L
+
+    private val tick = object : Runnable {
+        override fun run() {
+            if (DetectionBridge.aimActive) tryAim()
+            handler.postDelayed(this, 30) // 30ms بدل 80ms عشان الاستجابة
+        }
+    }
+
+    override fun onServiceConnected() { super.onServiceConnected(); instance = this; handler.post(tick) }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onInterrupt() {}
+
+    private fun tryAim() {
+        val now = System.currentTimeMillis()
+        // سرعة السحب عشان ميبقاش شرطة واحدة
+        if (now - lastAimMs < 60) return 
+        
+        val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
+        if (sw <= 0 || sh <= 0) return
+        val fov = DetectionBridge.fovPx.toFloat()
+        val cx = sw / 2f; val cy = sh / 2f
+
+        var best: Detection? = null; var bestD = Float.MAX_VALUE
+        for (d in DetectionBridge.latest) {
+            // بنستهدف الجزء العلوي (الرأس)
+            val targetX = (d.left + d.right) / 2f
+            val targetY = d.top + (d.bottom - d.top) * 0.2f // 20% من فوق (الرأس)
+            
+            val dist = hypot(targetX - cx, targetY - cy)
+            if (dist > fov) continue
+            if (dist < bestD) { bestD = dist; best = d }
+        }
+        
+        val target = best ?: return
+        
+        // حساب اتجاه التصويب للرأس
+        val tX = (target.left + target.right) / 2f
+        val tY = target.top + (target.bottom - target.top) * 0.2f
+
+        // معامل السحب (Smoothness): 0.15 يعني بيشد بالراحة
+        val dx = (tX - cx) * 0.15f
+        val dy = (tY - cy) * 0.15f
+        
+        if (hypot(dx, dy) < 4f) return // لو قريب جداً متحركش
+        
+        val path = Path().apply { moveTo(cx, cy); lineTo(cx + dx, cy + dy) }
+        val g = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 50)).build()
+        dispatchGesture(g, null, null)
+        lastAimMs = now
+    }
+
+    override fun onDestroy() { handler.removeCallbacks(tick); if (instance === this) instance = null; super.onDestroy() }
+}
