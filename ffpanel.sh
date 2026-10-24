@@ -371,7 +371,6 @@ class AimAccessibilityService : AccessibilityService() {
 
     private fun tryAim() {
         val now = System.currentTimeMillis()
-        // سرعة السحب عشان ميبقاش شرطة واحدة
         if (now - lastAimMs < 60) return 
         
         val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
@@ -381,8 +380,8 @@ class AimAccessibilityService : AccessibilityService() {
 
         var best: Detection? = null; var bestD = Float.MAX_VALUE
         for (d in DetectionBridge.latest) {
-            // التصويب على أول 5% من فوق في المربع (الراس)
-            val targetY = d.top + (d.bottom - d.top) * 0.05f 
+            // التصويب على أعلى نقطة (الرأس)
+            val targetY = d.top + (d.bottom - d.top) * 0.05f
             val targetX = (d.left + d.right) / 2f
             
             val dist = hypot(targetX - cx, targetY - cy)
@@ -395,14 +394,15 @@ class AimAccessibilityService : AccessibilityService() {
         val tX = (target.left + target.right) / 2f
         val tY = target.top + (target.bottom - target.top) * 0.05f
 
-        // سحب ناعم 15% عشان ميتجاوزش الراس
-        val dx = (tX - cx) * 0.15f 
-        val dy = (tY - cy) * 0.15f
+        // سحب سريع جداً (قفلة) 80%
+        val dx = (tX - cx) * 0.8f 
+        val dy = (tY - cy) * 0.8f
         
         if (hypot(dx, dy) < 4f) return
         
         val path = Path().apply { moveTo(cx, cy); lineTo(cx + dx, cy + dy) }
-        val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 50)).build()
+        // تقليل وقت السحب لـ 20ms عشان يبقى فوري
+        val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 20)).build()
         dispatchGesture(g, null, null)
         lastAimMs = now
     }
