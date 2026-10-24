@@ -191,7 +191,6 @@ class Detector(context: Context) : AutoCloseable {
     private val outMap = HashMap<Int, Any>()
 
     init {
-        // خفضنا الأنثريد لـ 2 عشان الرام ميتقلش
         interpreter = Interpreter(loadModel(context), Interpreter.Options().apply { setNumThreads(2) })
         isQuantInput = interpreter.getInputTensor(0).dataType() == DataType.UINT8
         inputBuffer = ByteBuffer.allocateDirect(INPUT_SIZE * INPUT_SIZE * 3 * 4).order(ByteOrder.nativeOrder())
@@ -362,7 +361,7 @@ class AimAccessibilityService : AccessibilityService() {
     private val tick = object : Runnable {
         override fun run() {
             if (DetectionBridge.aimActive) tryAim()
-            handler.postDelayed(this, 40)
+            handler.postDelayed(this, 30)
         }
     }
 
@@ -372,7 +371,8 @@ class AimAccessibilityService : AccessibilityService() {
 
     private fun tryAim() {
         val now = System.currentTimeMillis()
-        if (now - lastAimMs < 80) return
+        // سرعة السحب عشان ميبقاش شرطة واحدة
+        if (now - lastAimMs < 60) return 
         
         val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
         if (sw <= 0 || sh <= 0) return
@@ -381,18 +381,23 @@ class AimAccessibilityService : AccessibilityService() {
 
         var best: Detection? = null; var bestD = Float.MAX_VALUE
         for (d in DetectionBridge.latest) {
+            // التصويب على أول 5% من فوق في المربع (الراس)
+            val targetY = d.top + (d.bottom - d.top) * 0.05f 
             val targetX = (d.left + d.right) / 2f
-            val targetY = d.top + (d.bottom - d.top) * 0.2f
+            
             val dist = hypot(targetX - cx, targetY - cy)
             if (dist > fov) continue
             if (dist < bestD) { bestD = dist; best = d }
         }
         
         val target = best ?: return
+        
         val tX = (target.left + target.right) / 2f
-        val tY = target.top + (target.bottom - target.top) * 0.2f
-        val dx = (tX - cx) * 0.25f 
-        val dy = (tY - cy) * 0.25f
+        val tY = target.top + (target.bottom - target.top) * 0.05f
+
+        // سحب ناعم 15% عشان ميتجاوزش الراس
+        val dx = (tX - cx) * 0.15f 
+        val dy = (tY - cy) * 0.15f
         
         if (hypot(dx, dy) < 4f) return
         
@@ -622,23 +627,17 @@ class MainActivity : AppCompatActivity() {
 }
 EOF
 
-# ============ Model Download (SSD MobileNet - Lightweight) ============
+# ============ Model Download ============
 MODEL="$ROOT/app/src/main/assets/ssd_mobilenet.tflite"
-URL="https://storage.googleapis.com/download.tensorflow.org/models/tflite/task_library/object_detection/android/lite-model_efficientdet_lite0_detection_metadata_1.tflite"
-# * Actually let's use the real ssd_mobilenet tflite link for Android *
-URL="https://storage.googleapis.com/download.tensorflow.org/models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29.zip"
+URL="https://storage.googleapis.com/download.tensorflow.org/models/tflite/task_library/object_detection/android/lite-model_ssd_mobilenet_v1_1_metadata_2.tflite"
 
-echo "[*] downloading lightweight model..."
+echo "[*] downloading model..."
 if command -v curl >/dev/null 2>&1; then 
-    curl -L -o model.zip "$URL"
-    unzip -p model.zip detect.tflite > "$MODEL"
-    rm model.zip
+    curl -L -o "$MODEL" "$URL"
 elif command -v wget >/dev/null 2>&1; then 
-    wget -O model.zip "$URL"
-    unzip -p model.zip detect.tflite > "$MODEL"
-    rm model.zip
+    wget -O "$MODEL" "$URL"
 else 
-    echo "[!] Failed to download model. Ensure unzip is installed."; exit 1; 
+    echo "[!] Failed to download model."; exit 1; 
 fi
 
 if [ ! -f "$ROOT/gradlew" ]; then
