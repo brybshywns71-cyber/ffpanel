@@ -6,10 +6,8 @@ mkdir -p "$ROOT/app/src/main/java/com/vanta/ffpanel" \
          "$ROOT/app/src/main/res/layout" \
          "$ROOT/app/src/main/res/values" \
          "$ROOT/app/src/main/res/xml" \
-         "$ROOT/app/src/main/res/drawable" \
          "$ROOT/app/src/main/assets"
 
-# تم تحديث النسخ هنا لحل مشكلة compileSdk 34
 cat > "$ROOT/build.gradle.kts" <<'EOF'
 plugins {
     id("com.android.application") version "8.2.2" apply false
@@ -42,10 +40,7 @@ android {
         versionCode = 1; versionName = "1.0"
     }
     buildTypes { 
-        release { 
-            isMinifyEnabled = false 
-            signingConfig = signingConfigs.getByName("debug") 
-        } 
+        release { isMinifyEnabled = false } 
     }
     androidResources { noCompress += "tflite" }
 }
@@ -75,12 +70,9 @@ cat > "$ROOT/app/src/main/AndroidManifest.xml" <<'EOF'
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <service android:name=".ScreenCaptureService" android:exported="false"
-            android:foregroundServiceType="mediaProjection"/>
-        <service android:name=".OverlayService" android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="overlay_esp"/>
+        <service android:name=".ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection"/>
+        <service android:name=".OverlayService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="overlay"/>
         </service>
         <service android:name=".AimAccessibilityService" android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
@@ -104,7 +96,7 @@ EOF
 cat > "$ROOT/app/src/main/res/values/themes.xml" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.FFPanel" parent="Theme.Material3.Dark.NoActionBar"/>
+    <style name="Theme.FFPanel" parent="Theme.AppCompat.DayNight.NoActionBar"/>
 </resources>
 EOF
 cat > "$ROOT/app/src/main/res/xml/accessibility_service_config.xml" <<'EOF'
@@ -130,7 +122,7 @@ cat > "$ROOT/app/src/main/res/layout/activity_main.xml" <<'EOF'
     <Switch android:id="@+id/aimSwitch" android:text="Aimbot"
         android:layout_width="match_parent" android:layout_height="wrap_content"/>
     <EditText android:id="@+id/aimFovInput" android:hint="FOV (px)"
-        android:text="250" android:inputType="number"
+        android:text="150" android:inputType="number"
         android:layout_width="match_parent" android:layout_height="wrap_content"/>
     <Button android:id="@+id/btnAttach" android:text="Accessibility Settings"
         android:layout_marginTop="12dp"
@@ -140,19 +132,6 @@ cat > "$ROOT/app/src/main/res/layout/activity_main.xml" <<'EOF'
     <Button android:id="@+id/btnStop" android:text="Stop"
         android:layout_width="match_parent" android:layout_height="wrap_content"/>
 </LinearLayout>
-EOF
-
-cat > "$ROOT/app/src/main/res/drawable/bg_panel.xml" <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient
-        android:startColor="#E6000000"
-        android:centerColor="#E60A1929"
-        android:endColor="#E6005C99"
-        android:angle="135" />
-    <corners android:radius="18dp" />
-    <stroke android:width="3dp" android:color="#00FF40" />
-</shape>
 EOF
 
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/DetectionBridge.kt" <<'EOF'
@@ -171,7 +150,7 @@ object DetectionBridge {
     @Volatile var screenW: Int = 0
     @Volatile var screenH: Int = 0
     @Volatile var aimActive: Boolean = false
-    @Volatile var fovPx: Int = 250
+    @Volatile var fovPx: Int = 150
     @Volatile var showEsp: Boolean = true
 }
 EOF
@@ -455,7 +434,7 @@ class OverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         DetectionBridge.aimActive = intent?.getBooleanExtra("aim", false) ?: false
-        DetectionBridge.fovPx = intent?.getIntExtra("fov", 250) ?: 250
+        DetectionBridge.fovPx = intent?.getIntExtra("fov", 150) ?: 150
         DetectionBridge.showEsp = intent?.getBooleanExtra("esp", true) ?: true
 
         startForegroundNotification()
@@ -476,12 +455,12 @@ class OverlayService : Service() {
     private fun setupPanelView() {
         panelView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.bg_panel)
+            setBackgroundColor(Color.parseColor("#CC000000")) // Semi-transparent black instead of drawable
             setPadding(40, 40, 40, 40)
         }
         val title = TextView(this).apply {
-            text = "🔥 FF PANEL 🔥"
-            setTextColor(Color.parseColor("#00FF40"))
+            text = "FF PANEL"
+            setTextColor(Color.GREEN)
             textSize = 20f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 20)
@@ -489,7 +468,7 @@ class OverlayService : Service() {
         panelView.addView(title)
 
         val espSwitch = Switch(this).apply {
-            text = " ESP (Wallhack)"
+            text = " ESP"
             setTextColor(Color.WHITE)
             textSize = 16f
             isChecked = DetectionBridge.showEsp
@@ -498,7 +477,7 @@ class OverlayService : Service() {
         panelView.addView(espSwitch)
 
         val aimSwitch = Switch(this).apply {
-            text = " Aimbot (Head)"
+            text = " Aimbot"
             setTextColor(Color.WHITE)
             textSize = 16f
             isChecked = DetectionBridge.aimActive
@@ -545,7 +524,8 @@ class OverlayService : Service() {
             val ch = NotificationChannel(channelId, "FF Panel", NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
         }
-        startForeground(1, NotificationCompat.Builder(this, channelId).setContentTitle("FF Panel").setContentText("Running").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build())
+        val notif = NotificationCompat.Builder(this, channelId).setContentTitle("FF Panel").setContentText("Running").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
+        if (Build.VERSION.SDK_INT >= 34) startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, notif)
     }
 
     override fun onDestroy() {
@@ -631,7 +611,7 @@ class MainActivity : AppCompatActivity() {
         val ov = Intent(this, OverlayService::class.java).apply {
             putExtra("aim", aimSwitch.isChecked)
             putExtra("esp", espSwitch.isChecked)
-            putExtra("fov", fovInput.text.toString().toIntOrNull() ?: 250)
+            putExtra("fov", fovInput.text.toString().toIntOrNull() ?: 150)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { startForegroundService(cap); startForegroundService(ov) } else { startService(cap); startService(ov) }
         statusText.text = "شغّال"
