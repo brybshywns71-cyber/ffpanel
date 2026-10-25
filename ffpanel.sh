@@ -48,7 +48,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 }
 EOF
 
@@ -62,8 +62,8 @@ cat > "$ROOT/app/src/main/AndroidManifest.xml" <<'EOF'
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:allowBackup="false"
-        android:label="@string/app_name"
-        android:theme="@style/Theme.FFPanel">
+        android:label="FF Panel"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -86,65 +86,19 @@ cat > "$ROOT/app/src/main/AndroidManifest.xml" <<'EOF'
 </manifest>
 EOF
 
-cat > "$ROOT/app/src/main/res/values/strings.xml" <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">FF Panel</string>
-    <string name="accessibility_desc">Tap assist for FF Panel</string>
-</resources>
-EOF
-cat > "$ROOT/app/src/main/res/values/themes.xml" <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.FFPanel" parent="Theme.AppCompat.DayNight.NoActionBar"/>
-</resources>
-EOF
 cat > "$ROOT/app/src/main/res/xml/accessibility_service_config.xml" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:notificationTimeout="50"
     android:canRetrieveWindowContent="false"
     android:canPerformGestures="true"
-    android:description="@string/accessibility_desc" />
-EOF
-cat > "$ROOT/app/src/main/res/layout/activity_main.xml" <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical" android:padding="16dp"
-    android:layout_width="match_parent" android:layout_height="match_parent">
-    <TextView android:id="@+id/statusText" android:text="جاهز"
-        android:textSize="18sp" android:layout_marginBottom="12dp"
-        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-    <Switch android:id="@+id/espSwitch" android:text="ESP" android:checked="true"
-        android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <Switch android:id="@+id/aimSwitch" android:text="Aimbot"
-        android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <EditText android:id="@+id/aimFovInput" android:hint="FOV (px)"
-        android:text="150" android:inputType="number"
-        android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <Button android:id="@+id/btnAttach" android:text="Accessibility Settings"
-        android:layout_marginTop="12dp"
-        android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <Button android:id="@+id/btnStart" android:text="Start"
-        android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <Button android:id="@+id/btnStop" android:text="Stop"
-        android:layout_width="match_parent" android:layout_height="wrap_content"/>
-</LinearLayout>
+    android:description="FF Panel Aim" />
 EOF
 
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/DetectionBridge.kt" <<'EOF'
 package com.vanta.ffpanel
-
-data class Detection(
-    val left: Float, val top: Float, val right: Float, val bottom: Float,
-    val score: Float
-) {
-    val cx get() = (left + right) / 2f
-    val cy get() = (top + bottom) / 2f
-}
-
+data class Detection(val left: Float, val top: Float, val right: Float, val bottom: Float, val score: Float)
 object DetectionBridge {
     @Volatile var latest: List<Detection> = emptyList()
     @Volatile var screenW: Int = 0
@@ -157,7 +111,6 @@ EOF
 
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/Detector.kt" <<'EOF'
 package com.vanta.ffpanel
-
 import android.content.Context
 import android.graphics.Bitmap
 import org.tensorflow.lite.DataType
@@ -169,74 +122,50 @@ import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 
 class Detector(context: Context) : AutoCloseable {
-    companion object {
-        private const val MODEL_FILE = "ssd_mobilenet.tflite"
-        private const val INPUT_SIZE = 300
-        private const val MAX_DET = 10
-        private const val SCORE_THRESHOLD = 0.50f
-        private const val PERSON_CLASS = 0
-    }
-
     private val interpreter: Interpreter
     private val inputBuffer: ByteBuffer
     private val isQuantInput: Boolean
-    private val locOut = Array(1) { Array(MAX_DET) { FloatArray(4) } }
-    private val catOut = Array(1) { FloatArray(MAX_DET) }
-    private val scoreOut = Array(1) { FloatArray(MAX_DET) }
+    private val locOut = Array(1) { Array(10) { FloatArray(4) } }
+    private val catOut = Array(1) { FloatArray(10) }
+    private val scoreOut = Array(1) { FloatArray(10) }
     private val numOut = FloatArray(1)
     private val outMap = HashMap<Int, Any>()
 
     init {
         interpreter = Interpreter(loadModel(context), Interpreter.Options().apply { setNumThreads(2) })
         isQuantInput = interpreter.getInputTensor(0).dataType() == DataType.UINT8
-        inputBuffer = ByteBuffer.allocateDirect(INPUT_SIZE * INPUT_SIZE * 3 * 4).order(ByteOrder.nativeOrder())
-        outMap[0] = locOut
-        outMap[1] = catOut
-        outMap[2] = scoreOut
-        outMap[3] = numOut
+        inputBuffer = ByteBuffer.allocateDirect(300 * 300 * 3 * 4).order(ByteOrder.nativeOrder())
+        outMap[0] = locOut; outMap[1] = catOut; outMap[2] = scoreOut; outMap[3] = numOut
     }
 
     fun detect(frame: Bitmap): List<Detection> {
-        val scaled = Bitmap.createScaledBitmap(frame, INPUT_SIZE, INPUT_SIZE, true)
+        val scaled = Bitmap.createScaledBitmap(frame, 300, 300, true)
         inputBuffer.rewind()
-        val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
-        scaled.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
+        val pixels = IntArray(300 * 300)
+        scaled.getPixels(pixels, 0, 300, 0, 0, 300, 300)
         if (isQuantInput) {
-            for (p in pixels) {
-                inputBuffer.put(((p shr 16) and 0xFF).toByte())
-                inputBuffer.put(((p shr 8) and 0xFF).toByte())
-                inputBuffer.put((p and 0xFF).toByte())
-            }
+            for (p in pixels) { inputBuffer.put(((p shr 16) and 0xFF).toByte()); inputBuffer.put(((p shr 8) and 0xFF).toByte()); inputBuffer.put((p and 0xFF).toByte()) }
         } else {
-            for (p in pixels) {
-                inputBuffer.putFloat(((p shr 16) and 0xFF) / 255f)
-                inputBuffer.putFloat(((p shr 8) and 0xFF) / 255f)
-                inputBuffer.putFloat((p and 0xFF) / 255f)
-            }
+            for (p in pixels) { inputBuffer.putFloat(((p shr 16) and 0xFF) / 255f); inputBuffer.putFloat(((p shr 8) and 0xFF) / 255f); inputBuffer.putFloat((p and 0xFF) / 255f) }
         }
         inputBuffer.rewind()
         interpreter.runForMultipleInputsOutputs(arrayOf(inputBuffer), outMap)
         if (scaled !== frame) scaled.recycle()
 
-        val count = numOut[0].toInt().coerceIn(0, MAX_DET)
+        val count = numOut[0].toInt().coerceIn(0, 10)
         val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
         if (sw <= 0 || sh <= 0) return emptyList()
-
         val out = ArrayList<Detection>(count)
         for (i in 0 until count) {
-            if (scoreOut[0][i] < SCORE_THRESHOLD) continue
-            if (catOut[0][i].toInt() != PERSON_CLASS) continue
+            if (scoreOut[0][i] < 0.50f || catOut[0][i].toInt() != 0) continue
             val b = locOut[0][i]
             out.add(Detection(b[1] * sw, b[0] * sh, b[3] * sw, b[2] * sh, scoreOut[0][i]))
         }
         return out
     }
-
     private fun loadModel(context: Context): MappedByteBuffer {
-        context.assets.openFd(MODEL_FILE).use { fd ->
-            FileInputStream(fd.fileDescriptor).use { fis ->
-                return fis.channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
-            }
+        context.assets.openFd("ssd_mobilenet.tflite").use { fd ->
+            FileInputStream(fd.fileDescriptor).use { fis -> return fis.channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength) }
         }
     }
     override fun close() { try { interpreter.close() } catch (_: Throwable) {} }
@@ -245,7 +174,6 @@ EOF
 
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/ScreenCaptureService.kt" <<'EOF'
 package com.vanta.ffpanel
-
 import android.app.*
 import android.content.Context
 import android.content.Intent
@@ -263,18 +191,16 @@ import androidx.core.app.NotificationCompat
 class ScreenCaptureService : Service() {
     companion object {
         private const val CHANNEL_ID = "ffpanel_capture"
-        private const val NOTIF_ID = 2
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
     }
-
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var bgThread: HandlerThread? = null
     private var bgHandler: Handler? = null
     private var detector: Detector? = null
-    private var screenW = 0; private var screenH = 0; private var density = 0
+    private var screenW = 0; private var screenH = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -284,23 +210,26 @@ class ScreenCaptureService : Service() {
         val data = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_DATA, Intent::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_DATA)
         if (data == null) { stopSelf(); return START_NOT_STICKY }
 
-        startForegroundNotification()
+        if (Build.VERSION.SDK_INT >= 26) {
+            val ch = NotificationChannel(CHANNEL_ID, "FF", NotificationManager.IMPORTANCE_LOW)
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
+        }
+        val notif = NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle("FF").setSmallIcon(android.R.drawable.ic_menu_view).build()
+        if (Build.VERSION.SDK_INT >= 34) startForeground(2, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(2, notif)
+
         val dm = resources.displayMetrics
-        screenW = dm.widthPixels; screenH = dm.heightPixels; density = dm.densityDpi
+        screenW = dm.widthPixels; screenH = dm.heightPixels
         DetectionBridge.screenW = screenW; DetectionBridge.screenH = screenH
 
-        bgThread = HandlerThread("ffpanel-capture").also { it.start() }
+        bgThread = HandlerThread("capture").also { it.start() }
         bgHandler = Handler(bgThread!!.looper)
         detector = Detector(this)
 
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjection = mpm.getMediaProjection(resultCode, data) ?: run { stopSelf(); return START_NOT_STICKY }
-        if (Build.VERSION.SDK_INT >= 31) {
-            mediaProjection!!.registerCallback(object : MediaProjection.Callback() { override fun onStop() { stopSelf() } }, bgHandler)
-        }
+        mediaProjection = mpm.getMediaProjection(resultCode, data)
         imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 2)
         imageReader!!.setOnImageAvailableListener({ r -> onFrame(r) }, bgHandler)
-        virtualDisplay = mediaProjection!!.createVirtualDisplay("ffpanel-vd", screenW, screenH, density, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader!!.surface, null, bgHandler)
+        virtualDisplay = mediaProjection!!.createVirtualDisplay("vd", screenW, screenH, dm.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader!!.surface, null, bgHandler)
         return START_STICKY
     }
 
@@ -319,28 +248,15 @@ class ScreenCaptureService : Service() {
         } catch (_: Throwable) {} finally { image.close() }
     }
 
-    private fun startForegroundNotification() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(CHANNEL_ID, "FF Panel", NotificationManager.IMPORTANCE_LOW)
-            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
-        }
-        val notif = NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle("FF Panel").setContentText("Running").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
-        if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) else startForeground(NOTIF_ID, notif)
-    }
-
     override fun onDestroy() {
-        try { virtualDisplay?.release() } catch (_: Throwable) {}
-        try { imageReader?.close() } catch (_: Throwable) {}
-        try { mediaProjection?.stop() } catch (_: Throwable) {}
-        try { detector?.close() } catch (_: Throwable) {}
-        bgThread?.quitSafely(); super.onDestroy()
+        try { virtualDisplay?.release(); imageReader?.close(); mediaProjection?.stop(); detector?.close(); bgThread?.quitSafely() } catch (_: Throwable) {}
+        super.onDestroy()
     }
 }
 EOF
 
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/AimAccessibilityService.kt" <<'EOF'
 package com.vanta.ffpanel
-
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
@@ -360,7 +276,6 @@ class AimAccessibilityService : AccessibilityService() {
             handler.postDelayed(this, 20)
         }
     }
-
     override fun onServiceConnected() { super.onServiceConnected(); instance = this; handler.post(tick) }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
@@ -368,51 +283,32 @@ class AimAccessibilityService : AccessibilityService() {
     private fun tryAim() {
         val now = System.currentTimeMillis()
         if (now - lastAimMs < 50) return 
-        
         val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
-        if (sw <= 0 || sh <= 0) return
         val fov = DetectionBridge.fovPx.toFloat()
         val cx = sw / 2f; val cy = sh / 2f
-
         var best: Detection? = null; var bestD = Float.MAX_VALUE
         for (d in DetectionBridge.latest) {
-            val targetY = d.top + (d.bottom - d.top) * 0.05f 
-            val targetX = (d.left + d.right) / 2f
-            
-            val dist = hypot(targetX - cx, targetY - cy)
-            if (dist > fov) continue
-            if (dist < bestD) { bestD = dist; best = d }
+            val dist = hypot((d.left + d.right) / 2f - cx, (d.top + (d.bottom - d.top) * 0.05f) - cy)
+            if (dist < fov && dist < bestD) { bestD = dist; best = d }
         }
-        
         val target = best ?: return
-        
-        val tX = (target.left + target.right) / 2f
-        val tY = target.top + (target.bottom - target.top) * 0.05f
-
-        val distance = hypot(tX - cx, tY - cy)
-        val dragFactor = if (distance > 200f) 0.5f else 0.25f
-        
-        val dx = (tX - cx) * dragFactor
-        val dy = (tY - cy) * dragFactor
-        
+        val dx = ((target.left + target.right) / 2f - cx) * 0.4f
+        val dy = ((target.top + (target.bottom - target.top) * 0.05f) - cy) * 0.4f
         if (hypot(dx, dy) < 3f) return
-        
         val path = Path().apply { moveTo(cx, cy); lineTo(cx + dx, cy + dy) }
-        val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 20)).build()
-        dispatchGesture(g, null, null)
+        dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 20)).build(), null, null)
         lastAimMs = now
     }
-
-    override fun onDestroy() { handler.removeCallbacks(tick); if (instance === this) instance = null; super.onDestroy() }
+    override fun onDestroy() { handler.removeCallbacks(tick); instance = null; super.onDestroy() }
 }
 EOF
 
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/OverlayService.kt" <<'EOF'
 package com.vanta.ffpanel
-
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.*
 import android.os.Build
 import android.os.IBinder
@@ -431,120 +327,52 @@ class OverlayService : Service() {
     private lateinit var panelView: LinearLayout
 
     override fun onBind(intent: Intent?): IBinder? = null
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         DetectionBridge.aimActive = intent?.getBooleanExtra("aim", false) ?: false
         DetectionBridge.fovPx = intent?.getIntExtra("fov", 150) ?: 150
         DetectionBridge.showEsp = intent?.getBooleanExtra("esp", true) ?: true
 
-        startForegroundNotification()
+        if (Build.VERSION.SDK_INT >= 26) {
+            val ch = NotificationChannel("ov", "FF", NotificationManager.IMPORTANCE_LOW)
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
+        }
+        val notif = NotificationCompat.Builder(this, "ov").setContentTitle("FF").setSmallIcon(android.R.drawable.ic_menu_view).build()
+        if (Build.VERSION.SDK_INT >= 34) startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, notif)
+
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
         espView = ESPView(this)
-        val espParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
-        wm.addView(espView, espParams)
-        setupPanelView()
-        return START_STICKY
-    }
+        wm.addView(espView, WindowManager.LayoutParams(-1, -1, if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT))
 
-    private fun setupPanelView() {
-        panelView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#CC000000")) // Semi-transparent black instead of drawable
-            setPadding(40, 40, 40, 40)
-        }
-        val title = TextView(this).apply {
-            text = "FF PANEL"
-            setTextColor(Color.GREEN)
-            textSize = 20f
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 20)
-        }
-        panelView.addView(title)
+        panelView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.parseColor("#CC000000")); setPadding(40, 40, 40, 40) }
+        panelView.addView(TextView(this).apply { text = "FF PANEL"; setTextColor(Color.GREEN); textSize = 20f })
+        panelView.addView(Switch(this).apply { text = "ESP"; setTextColor(Color.WHITE); isChecked = DetectionBridge.showEsp; setOnCheckedChangeListener { _, b -> DetectionBridge.showEsp = b } })
+        panelView.addView(Switch(this).apply { text = "Aimbot"; setTextColor(Color.WHITE); isChecked = DetectionBridge.aimActive; setOnCheckedChangeListener { _, b -> DetectionBridge.aimActive = b } })
 
-        val espSwitch = Switch(this).apply {
-            text = " ESP"
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            isChecked = DetectionBridge.showEsp
-            setOnCheckedChangeListener { _, isChecked -> DetectionBridge.showEsp = isChecked }
-        }
-        panelView.addView(espSwitch)
-
-        val aimSwitch = Switch(this).apply {
-            text = " Aimbot"
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            isChecked = DetectionBridge.aimActive
-            setOnCheckedChangeListener { _, isChecked -> DetectionBridge.aimActive = isChecked }
-        }
-        panelView.addView(aimSwitch)
-
-        val panelParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        )
-        panelParams.gravity = Gravity.TOP or Gravity.START
-        panelParams.x = 50; panelParams.y = 100
-
+        val p = WindowManager.LayoutParams(-2, -2, if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
+        p.gravity = Gravity.TOP or Gravity.START; p.x = 50; p.y = 100
         panelView.setOnTouchListener(object : View.OnTouchListener {
-            private var initialX = 0; private var initialY = 0
-            private var initialTouchX = 0f; private var initialTouchY = 0f
-
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialX = panelParams.x; initialY = panelParams.y
-                        initialTouchX = event.rawX; initialTouchY = event.rawY
-                        return true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        panelParams.x = initialX + (event.rawX - initialTouchX).toInt()
-                        panelParams.y = initialY + (event.rawY - initialTouchY).toInt()
-                        wm.updateViewLayout(panelView, panelParams)
-                        return true
-                    }
-                }
+            var ix = 0; var iy = 0; var itx = 0f; var ity = 0f
+            override fun onTouch(v: View, e: MotionEvent): Boolean {
+                if (e.action == MotionEvent.ACTION_DOWN) { ix = p.x; iy = p.y; itx = e.rawX; ity = e.rawY; return true }
+                if (e.action == MotionEvent.ACTION_MOVE) { p.x = ix + (e.rawX - itx).toInt(); p.y = iy + (e.rawY - ity).toInt(); wm.updateViewLayout(panelView, p); return true }
                 return false
             }
         })
-        wm.addView(panelView, panelParams)
+        wm.addView(panelView, p)
+        return START_STICKY
     }
-
-    private fun startForegroundNotification() {
-        val channelId = "ff_panel_channel"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(channelId, "FF Panel", NotificationManager.IMPORTANCE_LOW)
-            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
-        }
-        val notif = NotificationCompat.Builder(this, channelId).setContentTitle("FF Panel").setContentText("Running").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
-        if (Build.VERSION.SDK_INT >= 34) startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, notif)
-    }
-
     override fun onDestroy() {
         if (::espView.isInitialized) wm.removeView(espView)
         if (::panelView.isInitialized) wm.removeView(panelView)
-        DetectionBridge.aimActive = false
         super.onDestroy()
     }
 }
-
-class ESPView(ctx: Context) : View(ctx) {
-    private val boxPaint = Paint().apply { color = Color.rgb(0, 255, 140); style = Paint.Style.STROKE; strokeWidth = 4f; isAntiAlias = true }
-    private val fovPaint = Paint().apply { color = Color.argb(80, 255, 255, 255); style = Paint.Style.STROKE; strokeWidth = 2f }
-
+class ESPView(c: Context) : View(c) {
+    private val b = Paint().apply { color = Color.GREEN; style = Paint.Style.STROKE; strokeWidth = 4f }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (DetectionBridge.aimActive) canvas.drawCircle(width / 2f, height / 2f, DetectionBridge.fovPx.toFloat(), fovPaint)
         if (!DetectionBridge.showEsp) return
-        for (d in DetectionBridge.latest) canvas.drawRect(d.left, d.top, d.right, d.bottom, boxPaint)
+        for (d in DetectionBridge.latest) canvas.drawRect(d.left, d.top, d.right, d.bottom, b)
         invalidate()
     }
 }
@@ -552,89 +380,40 @@ EOF
 
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/MainActivity.kt" <<'EOF'
 package com.vanta.ffpanel
-
-import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
-    companion object { private const val REQ_CAPTURE = 1001; private const val REQ_NOTIF = 1002 }
-    private lateinit var statusText: TextView
-    private lateinit var espSwitch: Switch
-    private lateinit var aimSwitch: Switch
-    private lateinit var fovInput: EditText
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        statusText = findViewById(R.id.statusText)
-        espSwitch = findViewById(R.id.espSwitch)
-        aimSwitch = findViewById(R.id.aimSwitch)
-        fovInput = findViewById(R.id.aimFovInput)
-
-        if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
-        if (!Settings.canDrawOverlays(this)) startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-
-        findViewById<Button>(R.id.btnAttach).setOnClickListener {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            statusText.text = "فعّل FF Panel في Accessibility"
-        }
-        findViewById<Button>(R.id.btnStart).setOnClickListener {
-            if (!Settings.canDrawOverlays(this)) { statusText.text = "صلاحية overlay مطلوبة"; return@setOnClickListener }
-            if (aimSwitch.isChecked && !isAccessibilityEnabled()) { statusText.text = "فعّل FF Panel في Accessibility أول"; return@setOnClickListener }
-            val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
-        }
-        findViewById<Button>(R.id.btnStop).setOnClickListener {
-            stopService(Intent(this, ScreenCaptureService::class.java))
-            stopService(Intent(this, OverlayService::class.java))
-            DetectionBridge.aimActive = false
-            statusText.text = "متوقف"
-        }
+    override fun onCreate(s: Bundle?) {
+        super.onCreate(s)
+        val l = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(50, 50, 50, 50) }
+        val s1 = Switch(this).apply { text = "ESP" }
+        val s2 = Switch(this).apply { text = "Aim" }
+        val f = EditText(this).apply { setText("150") }
+        val b1 = Button(this).apply { text = "Start"; setOnClickListener { 
+            if (!Settings.canDrawOverlays(this@MainActivity)) startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) 
+            else { val i = (getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).createScreenCaptureIntent(); startActivityForResult(i, 1) }
+        } }
+        l.addView(s1); l.addView(s2); l.addView(f); l.addView(b1)
+        setContentView(l)
     }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_CAPTURE) return
-        if (resultCode != Activity.RESULT_OK || data == null) { statusText.text = "التقاط مرفوض"; return }
-        val cap = Intent(this, ScreenCaptureService::class.java).apply {
-            putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
-            putExtra(ScreenCaptureService.EXTRA_DATA, data)
+    override fun onActivityResult(r: Int, c: Int, d: Intent?) {
+        if (r == 1 && c == Activity.RESULT_OK && d != null) {
+            startService(Intent(this, ScreenCaptureService::class.java).putExtra("resultCode", c).putExtra("data", d))
+            startService(Intent(this, OverlayService::class.java))
         }
-        val ov = Intent(this, OverlayService::class.java).apply {
-            putExtra("aim", aimSwitch.isChecked)
-            putExtra("esp", espSwitch.isChecked)
-            putExtra("fov", fovInput.text.toString().toIntOrNull() ?: 150)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { startForegroundService(cap); startForegroundService(ov) } else { startService(cap); startService(ov) }
-        statusText.text = "شغّال"
-    }
-
-    private fun isAccessibilityEnabled(): Boolean {
-        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-        val expected = "$packageName/${AimAccessibilityService::class.java.name}"
-        return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 }
 EOF
 
 MODEL="$ROOT/app/src/main/assets/ssd_mobilenet.tflite"
 URL="https://storage.googleapis.com/download.tensorflow.org/models/tflite/task_library/object_detection/android/lite-model_ssd_mobilenet_v1_1_metadata_2.tflite"
-echo "[*] downloading model..."
-if command -v curl >/dev/null 2>&1; then curl -L -o "$MODEL" "$URL"
-elif command -v wget >/dev/null 2>&1; then wget -O "$MODEL" "$URL"
-else echo "[!] Failed to download model."; exit 1; fi
-
-if [ ! -f "$ROOT/gradlew" ]; then
-    if command -v gradle >/dev/null 2>&1; then (cd "$ROOT" && gradle wrapper --gradle-version 8.5)
-    else echo "[!] Gradle not found."; fi
-fi
+if command -v curl >/dev/null 2>&1; then curl -L -o "$MODEL" "$URL"; fi
 
 echo "[✓] Project ready: $ROOT/"
