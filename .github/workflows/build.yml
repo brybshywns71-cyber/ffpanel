@@ -27,7 +27,7 @@ jobs:
         run: |
           cd FFPanel
           gradle assembleDebug --stacktrace
-      - name: Rename APK to Release
+      - name: Rename APK
         run: |
           mv FFPanel/app/build/outputs/apk/debug/app-debug.apk FFPanel/app/build/outputs/apk/debug/app-release.apk
       - name: Create Release
