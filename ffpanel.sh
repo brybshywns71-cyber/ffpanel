@@ -9,10 +9,11 @@ mkdir -p "$ROOT/app/src/main/java/com/vanta/ffpanel" \
          "$ROOT/app/src/main/res/drawable" \
          "$ROOT/app/src/main/assets"
 
+# تم تحديث النسخ هنا لحل مشكلة compileSdk 34
 cat > "$ROOT/build.gradle.kts" <<'EOF'
 plugins {
-    id("com.android.application") version "8.1.0" apply false
-    id("org.jetbrains.kotlin.android") version "1.9.0" apply false
+    id("com.android.application") version "8.2.2" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.22" apply false
 }
 EOF
 cat > "$ROOT/settings.gradle.kts" <<'EOF'
@@ -30,7 +31,6 @@ kotlin.code.style=official
 android.nonTransitiveRClass=true
 EOF
 
-# ============ build.gradle.kts للتطبيق (فيه التوقيع جاهز) ============
 cat > "$ROOT/app/build.gradle.kts" <<'EOF'
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
@@ -57,7 +57,6 @@ dependencies {
 }
 EOF
 
-# ============ Manifest ============
 cat > "$ROOT/app/src/main/AndroidManifest.xml" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -95,7 +94,6 @@ cat > "$ROOT/app/src/main/AndroidManifest.xml" <<'EOF'
 </manifest>
 EOF
 
-# ============ Resources ============
 cat > "$ROOT/app/src/main/res/values/strings.xml" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
@@ -144,7 +142,6 @@ cat > "$ROOT/app/src/main/res/layout/activity_main.xml" <<'EOF'
 </LinearLayout>
 EOF
 
-# ============ خلفية البانل (XML) ============
 cat > "$ROOT/app/src/main/res/drawable/bg_panel.xml" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
@@ -158,7 +155,6 @@ cat > "$ROOT/app/src/main/res/drawable/bg_panel.xml" <<'EOF'
 </shape>
 EOF
 
-# ============ Kotlin ============
 cat > "$ROOT/app/src/main/java/com/vanta/ffpanel/DetectionBridge.kt" <<'EOF'
 package com.vanta.ffpanel
 
@@ -382,7 +378,7 @@ class AimAccessibilityService : AccessibilityService() {
     private val tick = object : Runnable {
         override fun run() {
             if (DetectionBridge.aimActive) tryAim()
-            handler.postDelayed(this, 30)
+            handler.postDelayed(this, 20)
         }
     }
 
@@ -392,7 +388,7 @@ class AimAccessibilityService : AccessibilityService() {
 
     private fun tryAim() {
         val now = System.currentTimeMillis()
-        if (now - lastAimMs < 60) return 
+        if (now - lastAimMs < 50) return 
         
         val sw = DetectionBridge.screenW; val sh = DetectionBridge.screenH
         if (sw <= 0 || sh <= 0) return
@@ -401,20 +397,26 @@ class AimAccessibilityService : AccessibilityService() {
 
         var best: Detection? = null; var bestD = Float.MAX_VALUE
         for (d in DetectionBridge.latest) {
-            val targetY = d.top + (d.bottom - d.top) * 0.10f
+            val targetY = d.top + (d.bottom - d.top) * 0.05f 
             val targetX = (d.left + d.right) / 2f
+            
             val dist = hypot(targetX - cx, targetY - cy)
             if (dist > fov) continue
             if (dist < bestD) { bestD = dist; best = d }
         }
         
         val target = best ?: return
-        val tX = (target.left + target.right) / 2f
-        val tY = target.top + (target.bottom - target.top) * 0.10f
-        val dx = (tX - cx) * 0.4f 
-        val dy = (tY - cy) * 0.4f
         
-        if (hypot(dx, dy) < 4f) return
+        val tX = (target.left + target.right) / 2f
+        val tY = target.top + (target.bottom - target.top) * 0.05f
+
+        val distance = hypot(tX - cx, tY - cy)
+        val dragFactor = if (distance > 200f) 0.5f else 0.25f
+        
+        val dx = (tX - cx) * dragFactor
+        val dy = (tY - cy) * dragFactor
+        
+        if (hypot(dx, dy) < 3f) return
         
         val path = Path().apply { moveTo(cx, cy); lineTo(cx + dx, cy + dy) }
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 20)).build()
@@ -651,7 +653,7 @@ elif command -v wget >/dev/null 2>&1; then wget -O "$MODEL" "$URL"
 else echo "[!] Failed to download model."; exit 1; fi
 
 if [ ! -f "$ROOT/gradlew" ]; then
-    if command -v gradle >/dev/null 2>&1; then (cd "$ROOT" && gradle wrapper --gradle-version 8.1)
+    if command -v gradle >/dev/null 2>&1; then (cd "$ROOT" && gradle wrapper --gradle-version 8.5)
     else echo "[!] Gradle not found."; fi
 fi
 
