@@ -20,14 +20,17 @@ jobs:
           gradle-version: 8.5
       - name: Generate project
         run: bash ffpanel.sh
-      - name: Build APK
+      - name: Build APK (Debug)
         run: |
           cd FFPanel
-          gradle assembleDebug
+          gradle assembleDebug --stacktrace
+      - name: Rename APK
+        run: |
+          mv FFPanel/app/build/outputs/apk/debug/app-debug.apk FFPanel/app/build/outputs/apk/debug/app-release.apk
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.${{ github.run_number }}
-          name: FF Crosshair
-          files: FFPanel/app/build/outputs/apk/debug/app-debug.apk
+          tag_name: v1.0.${{ github.run_number }}
+          name: FF Panel v1.0.${{ github.run_number }}
+          files: FFPanel/app/build/outputs/apk/debug/app-release.apk
           make_latest: true
